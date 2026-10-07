@@ -3,7 +3,6 @@ name: LBV Appointment Checker
 on:
   schedule:
     - cron: "*/5 * * * *"
-
   workflow_dispatch:
 
 concurrency:
@@ -42,8 +41,7 @@ jobs:
           LBV_FIRST_NAME: ${{ secrets.LBV_FIRST_NAME }}
           LBV_LAST_NAME: ${{ secrets.LBV_LAST_NAME }}
           LBV_EMAIL: ${{ secrets.LBV_EMAIL }}
-        run: |
-          python checker.py
+        run: python checker.py
 
       - name: Upload LBV debug files
         if: always()
@@ -51,7 +49,7 @@ jobs:
         with:
           name: lbv-debug
           path: debug/
-          if-no-files-found: warn
+          if-no-files-found: ignore
           retention-days: 3
 
       - name: Save alert state
