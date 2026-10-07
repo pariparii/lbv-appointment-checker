@@ -75,7 +75,25 @@ async def dismiss_cookie_banner(page) -> None:
         r"Einverstanden",
         r"Zustimmen",
     ]
+async def close_lbv_welcome_modal(page) -> None:
+    try:
+        button = page.get_by_role(
+            "button",
+            name=re.compile(
+                r"Verstanden und schließen",
+                re.IGNORECASE,
+            ),
+        )
 
+        if await button.count() > 0:
+            if await button.first.is_visible():
+                await button.first.click()
+                await page.wait_for_timeout(500)
+                log("LBV welcome modal closed.")
+                return
+
+    except Exception as exc:
+        log(f"Welcome modal was not found or could not be closed: {exc}")
     for pattern in patterns:
         try:
             locator = page.get_by_role(
@@ -556,9 +574,15 @@ async def run_checker():
         try:
             log("Opening LBV...")
             await page.goto(
-                LBV_HOME,
-                wait_until="domcontentloaded",
-                timeout=60000,
+    LBV_HOME,
+    wait_until="domcontentloaded",
+    timeout=60000,
+)
+
+await dismiss_cookie_banner(page)
+await close_lbv_welcome_modal(page)
+
+log("Selecting service...")
             )
 
             await dismiss_cookie_banner(page)
