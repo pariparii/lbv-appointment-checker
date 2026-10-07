@@ -9,20 +9,15 @@ import requests
 from playwright.async_api import async_playwright
 
 
-# ---------------------------------------------------------
+# =========================================================
 # SETTINGS
-# ---------------------------------------------------------
+# =========================================================
 
 BASE_URL = "https://lbv-termine.de/frontend/"
 
 FUEHRERSCHEIN_URL = (
     BASE_URL
     + "dienstleistungsauswahl.php?kategorieid=1"
-)
-
-EU_KARTENFUHRERSCHEIN_URL = (
-    BASE_URL
-    + "onlinedienstleistung.php?dienstleistungsid=176"
 )
 
 TARGET_DATE = date(2026, 12, 2)
@@ -46,9 +41,9 @@ MONTHS = {
 }
 
 
-# ---------------------------------------------------------
-# GENERAL
-# ---------------------------------------------------------
+# =========================================================
+# BASIC FUNCTIONS
+# =========================================================
 
 def log(message):
     print(f"[LBV] {message}", flush=True)
@@ -81,9 +76,9 @@ def write_state(value):
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # TELEGRAM
-# ---------------------------------------------------------
+# =========================================================
 
 def send_telegram(message):
 
@@ -108,9 +103,9 @@ def send_telegram(message):
     response.raise_for_status()
 
 
-# ---------------------------------------------------------
-# LBV POPUPS / MODALS
-# ---------------------------------------------------------
+# =========================================================
+# POPUPS
+# =========================================================
 
 async def close_modal(page):
 
@@ -118,7 +113,6 @@ async def close_modal(page):
         "Verstanden und schließen",
         "Verstanden",
         "Schließen",
-        "schließen",
     ]
 
     for pattern in patterns:
@@ -216,11 +210,11 @@ async def close_cookie_banner(page):
                 pass
 
 
-# ---------------------------------------------------------
-# OPEN LBV PAGES
-# ---------------------------------------------------------
+# =========================================================
+# OPEN THE CORRECT LBV SERVICE
+# =========================================================
 
-async def open_lbv_flow(page):
+async def open_lbv_service(page):
 
     log("Opening LBV...")
 
@@ -238,7 +232,7 @@ async def open_lbv_flow(page):
     await close_modal(page)
 
     log(
-        "Opening Führerschein services..."
+        "Opening Führerschein service list..."
     )
 
     await page.goto(
@@ -255,30 +249,76 @@ async def open_lbv_flow(page):
     await close_modal(page)
 
     log(
-        "Opening EU-Kartenführerschein service..."
+        "Selecting EU-Kartenführerschein..."
     )
 
-    await page.goto(
-        EU_KARTENFUHRERSCHEIN_URL,
-        wait_until="commit",
-        timeout=30000
+    # The LBV page has:
+    #
+    #   id="termin176"
+    #
+    # and inside it a button whose onclick is:
+    #
+    #   callURL(
+    #       'onlinedienstleistung.php?dienstleistungsid=176'
+    #   )
+    #
+    # Execute that exact onclick so the LBV session state
+    # is preserved.
+
+    result = await page.evaluate(
+        """
+        () => {
+
+            const box =
+                document.querySelector(
+                    "#termin176"
+                );
+
+            if (!box) {
+                return "NO_BOX";
+            }
+
+            const button =
+                box.querySelector(
+                    "button.LBV-choosebutton"
+                );
+
+            if (!button) {
+                return "NO_BUTTON";
+            }
+
+            button.click();
+
+            return "CLICKED";
+        }
+        """
     )
+
+    log(
+        f"EU service button result: {result}"
+    )
+
+    if result != "CLICKED":
+
+        raise RuntimeError(
+            "Could not activate the "
+            "EU-Kartenführerschein service."
+        )
 
     await page.wait_for_timeout(
         4000
     )
 
-    await close_cookie_banner(page)
     await close_modal(page)
 
     log(
-        "EU-Kartenführerschein page opened."
+        f"Current LBV URL: {page.url}"
     )
 
 
-# ---------------------------------------------------------
-# PRIVACY
-# ---------------------------------------------------------
+# =========================================================
+# PRIVACY PAGE
+# =========================================================
 
 async def accept_privacy(page):
 
@@ -309,6 +349,7 @@ async def accept_privacy(page):
             checkbox = checkboxes.nth(i)
 
             if not await checkbox.is_checked():
+
                 await checkbox.check(
                     force=True
                 )
@@ -360,14 +401,13 @@ async def accept_privacy(page):
             pass
 
 
-# ---------------------------------------------------------
-# CLICK TEXT
-# ---------------------------------------------------------
+# =========================================================
+# GENERIC TEXT CLICK
+# =========================================================
 
 async def click_text(
     page,
-    pattern,
-    timeout=5000
+    pattern
 ):
 
     locator = page.get_by_text(
@@ -380,6 +420,7 @@ async def click_text(
     count = await locator.count()
 
     if count == 0:
+
         raise RuntimeError(
             f'Could not find "{pattern}"'
         )
@@ -403,7 +444,7 @@ async def click_text(
 
                 await element.click(
                     force=True,
-                    timeout=timeout
+                    timeout=3000
                 )
 
             except Exception:
@@ -413,7 +454,7 @@ async def click_text(
                 )
 
             await page.wait_for_timeout(
-                600
+                700
             )
 
             return
@@ -426,9 +467,9 @@ async def click_text(
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # PERSONAL DATA
-# ---------------------------------------------------------
+# =========================================================
 
 async def fill_personal_data(page):
 
@@ -450,12 +491,12 @@ async def fill_personal_data(page):
         "LBV_EMAIL"
     ]
 
-    # Select private person
+    # Private person
     try:
 
         locator = page.get_by_text(
             re.compile(
-                r"Der Termin ist für mich als Privatperson",
+                "Der Termin ist für mich als Privatperson",
                 re.IGNORECASE
             )
         )
@@ -469,7 +510,7 @@ async def fill_personal_data(page):
     except Exception:
         pass
 
-    # Select "Ich"
+    # "Ich"
     try:
 
         locator = page.get_by_text(
@@ -490,8 +531,7 @@ async def fill_personal_data(page):
 
     # Find visible fields
     fields = page.locator(
-        "input[type='text'], "
-        "input[type='email']"
+        "input[type='text'], input[type='email']"
     )
 
     visible_fields = []
@@ -505,12 +545,18 @@ async def fill_personal_data(page):
         try:
 
             if await field.is_visible():
+
                 visible_fields.append(
                     field
                 )
 
         except Exception:
             pass
+
+    log(
+        f"Found {len(visible_fields)} "
+        f"visible personal-data fields."
+    )
 
     if len(visible_fields) < 3:
 
@@ -545,9 +591,9 @@ async def fill_personal_data(page):
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # LOCATION
-# ---------------------------------------------------------
+# =========================================================
 
 async def select_location(page):
 
@@ -576,9 +622,9 @@ async def select_location(page):
     )
 
 
-# ---------------------------------------------------------
-# CALENDAR
-# ---------------------------------------------------------
+# =========================================================
+# CALENDAR MONTH
+# =========================================================
 
 async def get_calendar_month(page):
 
@@ -630,7 +676,6 @@ async def click_month_arrow(
     direction
 ):
 
-    # Try literal > or <
     elements = page.locator(
         "button, a"
     )
@@ -686,7 +731,7 @@ async def click_month_arrow(
 
             if direction == ">":
 
-                keywords = [
+                words = [
                     "next",
                     "weiter",
                     "nächster",
@@ -695,7 +740,7 @@ async def click_month_arrow(
 
             else:
 
-                keywords = [
+                words = [
                     "previous",
                     "prev",
                     "zurück",
@@ -703,8 +748,8 @@ async def click_month_arrow(
                 ]
 
             if any(
-                keyword in aria
-                for keyword in keywords
+                word in aria
+                for word in words
             ):
 
                 await element.click(
@@ -739,20 +784,20 @@ async def move_to_month(
             )
         )
 
-        current_index = (
+        current = (
             current_year * 12
             + current_month
         )
 
-        target_index = (
+        target = (
             target_year * 12
             + target_month
         )
 
-        if current_index == target_index:
+        if current == target:
             return
 
-        if current_index < target_index:
+        if current < target:
 
             await click_month_arrow(
                 page,
@@ -771,6 +816,10 @@ async def move_to_month(
         "calendar month."
     )
 
+
+# =========================================================
+# AVAILABLE DAYS
+# =========================================================
 
 async def get_available_days(page):
 
@@ -809,8 +858,8 @@ async def get_available_days(page):
             ).lower()
 
             if any(
-                word in classes
-                for word in [
+                x in classes
+                for x in [
                     "disabled",
                     "inactive",
                     "unavailable",
@@ -849,6 +898,10 @@ async def get_available_days(page):
     )
 
 
+# =========================================================
+# CLICK DAY
+# =========================================================
+
 async def click_calendar_day(
     page,
     day_number
@@ -874,6 +927,25 @@ async def click_calendar_day(
             ).strip()
 
             if text != str(day_number):
+                continue
+
+            classes = (
+                await cell.get_attribute(
+                    "class"
+                )
+                or ""
+            ).lower()
+
+            if any(
+                x in classes
+                for x in [
+                    "disabled",
+                    "inactive",
+                    "unavailable",
+                    "other-month",
+                    "othermonth"
+                ]
+            ):
                 continue
 
             await cell.scroll_into_view_if_needed()
@@ -907,6 +979,10 @@ async def click_calendar_day(
     return False
 
 
+# =========================================================
+# AVAILABLE TIMES
+# =========================================================
+
 async def get_available_times(page):
 
     times = []
@@ -936,13 +1012,20 @@ async def get_available_times(page):
             ):
 
                 if text not in times:
-                    times.append(text)
+
+                    times.append(
+                        text
+                    )
 
         except Exception:
             pass
 
     return sorted(times)
 
+
+# =========================================================
+# SCAN CALENDAR
+# =========================================================
 
 async def scan_calendar(page):
 
@@ -982,11 +1065,9 @@ async def scan_calendar(page):
             except ValueError:
                 continue
 
-            # Only dates from today onward
             if appointment_date < today:
                 continue
 
-            # User wants ONLY dates before 02.12.2026
             if appointment_date >= TARGET_DATE:
                 continue
 
@@ -1009,7 +1090,6 @@ async def scan_calendar(page):
                     "times": times
                 }
 
-        # Stop when December 2026 has been checked
         if (
             year == TARGET_DATE.year
             and month == TARGET_DATE.month
@@ -1028,9 +1108,9 @@ async def scan_calendar(page):
     return None
 
 
-# ---------------------------------------------------------
-# MAIN CHECK
-# ---------------------------------------------------------
+# =========================================================
+# MAIN BROWSER PROCESS
+# =========================================================
 
 async def run_checker():
 
@@ -1065,18 +1145,27 @@ async def run_checker():
 
         try:
 
-            # Open the correct LBV service directly
-            await open_lbv_flow(page)
+            # 1. Open the correct service
+            await open_lbv_service(
+                page
+            )
 
-            # Handle possible privacy page
-            await accept_privacy(page)
+            # 2. Privacy if required
+            await accept_privacy(
+                page
+            )
 
-            # Personal data
-            await fill_personal_data(page)
+            # 3. Personal information
+            await fill_personal_data(
+                page
+            )
 
-            # Select LBV Mitte
-            await select_location(page)
+            # 4. Location
+            await select_location(
+                page
+            )
 
+            # 5. Calendar
             log(
                 "Scanning appointment calendar..."
             )
@@ -1092,9 +1181,9 @@ async def run_checker():
             await browser.close()
 
 
-# ---------------------------------------------------------
+# =========================================================
 # PROGRAM START
-# ---------------------------------------------------------
+# =========================================================
 
 def main():
 
@@ -1137,8 +1226,13 @@ def main():
     # APPOINTMENT FOUND
     # -----------------------------------------------------
 
-    appointment_date = result["date"]
-    times = result["times"]
+    appointment_date = result[
+        "date"
+    ]
+
+    times = result[
+        "times"
+    ]
 
     fingerprint = (
         appointment_date.isoformat()
@@ -1146,7 +1240,7 @@ def main():
         + ",".join(times)
     )
 
-    # Don't send the same alert every 5 minutes
+    # Avoid duplicate notifications
     if fingerprint == previous_state:
 
         log(
