@@ -9,6 +9,10 @@ import requests
 from playwright.async_api import async_playwright
 
 
+# =========================================================
+# SETTINGS
+# =========================================================
+
 BASE_URL = "https://lbv-termine.de/frontend/"
 
 FUEHRERSCHEIN_URL = (
@@ -36,6 +40,10 @@ MONTHS = {
     "Dezember": 12,
 }
 
+
+# =========================================================
+# BASIC FUNCTIONS
+# =========================================================
 
 def log(message):
     print(f"[LBV] {message}", flush=True)
@@ -68,6 +76,10 @@ def write_state(value):
     )
 
 
+# =========================================================
+# TELEGRAM
+# =========================================================
+
 def send_telegram(message):
 
     token = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -90,6 +102,10 @@ def send_telegram(message):
 
     response.raise_for_status()
 
+
+# =========================================================
+# LBV MODALS
+# =========================================================
 
 async def close_modal(page):
 
@@ -194,6 +210,12 @@ async def close_cookie_banner(page):
                 pass
 
 
+# =========================================================
+# STEP 1:
+# OPEN LBV + SELECT FÜHRERSCHEIN
+# + SELECT EU-KARTENFÜHRERSCHEIN
+# =========================================================
+
 async def open_service(page):
 
     log("Opening LBV...")
@@ -232,6 +254,8 @@ async def open_service(page):
         "Selecting EU-Kartenführerschein..."
     )
 
+    # EU-Kartenführerschein is service 176.
+    # Use the actual LBV service container.
     result = await page.evaluate(
         """
         () => {
@@ -267,11 +291,12 @@ async def open_service(page):
 
     if result != "CLICKED":
         raise RuntimeError(
-            "Could not select EU-Kartenführerschein."
+            "Could not select "
+            "EU-Kartenführerschein."
         )
 
     await page.wait_for_timeout(
-        4000
+        3000
     )
 
     await close_modal(page)
@@ -280,6 +305,12 @@ async def open_service(page):
         f"Current LBV URL: {page.url}"
     )
 
+
+# =========================================================
+# STEP 2:
+# DESCRIPTION PAGE
+# CLICK "WEITER ZUR TERMINVEREINBARUNG"
+# =========================================================
 
 async def continue_from_description(page):
 
@@ -295,117 +326,104 @@ async def continue_from_description(page):
 
     await close_modal(page)
 
-    # Possible button/link texts used by LBV
-    patterns = [
-        r"zum Vor-Ort-Termin",
-        r"Termin vereinbaren",
-        r"Termin buchen",
-        r"zum Termin",
-        r"weiter zum Termin",
-        r"weiter",
-        r"fortfahren",
-    ]
+    button = page.get_by_role(
+        "button",
+        name=re.compile(
+            r"weiter zur Terminvereinbarung",
+            re.IGNORECASE
+        )
+    )
 
-    for pattern in patterns:
+    count = await button.count()
 
-        locator = page.get_by_text(
+    log(
+        f"Found {count} "
+        f"'weiter zur Terminvereinbarung' button(s)."
+    )
+
+    if count == 0:
+
+        # Fallback: search by text
+        button = page.get_by_text(
             re.compile(
-                pattern,
+                r"weiter zur Terminvereinbarung",
                 re.IGNORECASE
             )
         )
 
-        count = await locator.count()
+        count = await button.count()
 
-        for i in range(count):
+    if count == 0:
 
-            element = locator.nth(i)
+        raise RuntimeError(
+            "Could not find "
+            "'weiter zur Terminvereinbarung'."
+        )
 
-            try:
+    clicked = False
 
-                if not await element.is_visible():
-                    continue
+    for i in range(count):
 
-                log(
-                    f"Trying description button: "
-                    f"{pattern}"
-                )
-
-                await element.scroll_into_view_if_needed()
-
-                try:
-
-                    await element.click(
-                        force=True,
-                        timeout=3000
-                    )
-
-                except Exception:
-
-                    await element.evaluate(
-                        "(el) => el.click()"
-                    )
-
-                await page.wait_for_timeout(
-                    1500
-                )
-
-                # Check whether the page changed.
-                if (
-                    page.url
-                    != BASE_URL
-                ):
-                    log(
-                        f"Description step completed. "
-                        f"Current URL: {page.url}"
-                    )
-                    return
-
-            except Exception:
-                continue
-
-    # If text search didn't work, inspect buttons.
-    buttons = page.locator(
-        "button, input[type='submit'], a"
-    )
-
-    for i in range(
-        await buttons.count()
-    ):
-
-        element = buttons.nth(i)
+        element = button.nth(i)
 
         try:
 
             if not await element.is_visible():
                 continue
 
-            text = (
-                await element.inner_text()
-            ).strip()
+            await element.scroll_into_view_if_needed()
 
-            if text:
-                log(
-                    f"Description page button: "
-                    f"{text[:100]}"
+            try:
+
+                await element.click(
+                    force=True,
+                    timeout=5000
                 )
 
-        except Exception:
-            pass
+            except Exception:
 
-    raise RuntimeError(
-        "Could not continue from the "
-        "LBV service description page."
+                await element.evaluate(
+                    "(el) => el.click()"
+                )
+
+            clicked = True
+            break
+
+        except Exception:
+            continue
+
+    if not clicked:
+
+        raise RuntimeError(
+            "Could not click "
+            "'weiter zur Terminvereinbarung'."
+        )
+
+    # Wait for the next LBV page.
+    await page.wait_for_timeout(
+        2000
     )
 
+    log(
+        f"After description page: {page.url}"
+    )
+
+
+# =========================================================
+# STEP 3:
+# PRIVACY PAGE IF PRESENT
+# =========================================================
 
 async def accept_privacy(page):
 
     try:
+
         body = await page.locator(
             "body"
         ).inner_text()
+
     except Exception:
+
         body = ""
 
     if "Datenschutzerklärung" not in body:
@@ -436,12 +454,14 @@ async def accept_privacy(page):
         except Exception:
             pass
 
-    for pattern in [
+    patterns = [
         "weiter",
         "bestätigen",
         "zustimmen",
         "akzeptieren",
-    ]:
+    ]
+
+    for pattern in patterns:
 
         try:
 
@@ -462,10 +482,13 @@ async def accept_privacy(page):
                     continue
 
                 try:
+
                     await element.click(
                         force=True
                     )
+
                 except Exception:
+
                     await element.evaluate(
                         "(el) => el.click()"
                     )
@@ -479,6 +502,10 @@ async def accept_privacy(page):
         except Exception:
             pass
 
+
+# =========================================================
+# GENERIC TEXT CLICK
+# =========================================================
 
 async def click_text(
     page,
@@ -495,6 +522,7 @@ async def click_text(
     count = await locator.count()
 
     if count == 0:
+
         raise RuntimeError(
             f'Could not find "{pattern}"'
         )
@@ -541,6 +569,11 @@ async def click_text(
     )
 
 
+# =========================================================
+# STEP 4:
+# PERSONAL DATA
+# =========================================================
+
 async def fill_personal_data(page):
 
     log(
@@ -561,6 +594,7 @@ async def fill_personal_data(page):
         "LBV_EMAIL"
     ]
 
+    # Private person
     try:
 
         locator = page.get_by_text(
@@ -571,6 +605,7 @@ async def fill_personal_data(page):
         )
 
         if await locator.count() > 0:
+
             await locator.first.click(
                 force=True
             )
@@ -578,6 +613,7 @@ async def fill_personal_data(page):
     except Exception:
         pass
 
+    # Ich
     try:
 
         locator = page.get_by_text(
@@ -588,6 +624,7 @@ async def fill_personal_data(page):
         )
 
         if await locator.count() > 0:
+
             await locator.first.click(
                 force=True
             )
@@ -595,6 +632,7 @@ async def fill_personal_data(page):
     except Exception:
         pass
 
+    # Find the visible text/email inputs.
     fields = page.locator(
         "input[type='text'], "
         "input[type='email']"
@@ -611,6 +649,7 @@ async def fill_personal_data(page):
         try:
 
             if await field.is_visible():
+
                 visible_fields.append(
                     field
                 )
@@ -656,6 +695,11 @@ async def fill_personal_data(page):
     )
 
 
+# =========================================================
+# STEP 5:
+# LOCATION
+# =========================================================
+
 async def select_location(page):
 
     log(
@@ -683,6 +727,10 @@ async def select_location(page):
     )
 
 
+# =========================================================
+# CALENDAR
+# =========================================================
+
 async def get_calendar_month(page):
 
     body = await page.locator(
@@ -705,8 +753,10 @@ async def get_calendar_month(page):
     )
 
     if not match:
+
         raise RuntimeError(
-            "Could not determine calendar month."
+            "Could not determine "
+            "calendar month."
         )
 
     month_name = match.group(1)
@@ -731,6 +781,7 @@ async def click_month_arrow(
         "button, a"
     )
 
+    # Literal arrow
     for i in range(
         await elements.count()
     ):
@@ -761,6 +812,7 @@ async def click_month_arrow(
         except Exception:
             pass
 
+    # aria-label
     for i in range(
         await elements.count()
     ):
@@ -780,13 +832,16 @@ async def click_month_arrow(
             ).lower()
 
             if direction == ">":
+
                 words = [
                     "next",
                     "weiter",
                     "nächster",
                     "naechster"
                 ]
+
             else:
+
                 words = [
                     "previous",
                     "prev",
@@ -826,7 +881,9 @@ async def move_to_month(
     for _ in range(24):
 
         current_year, current_month = (
-            await get_calendar_month(page)
+            await get_calendar_month(
+                page
+            )
         )
 
         current = (
@@ -855,6 +912,11 @@ async def move_to_month(
                 page,
                 "<"
             )
+
+    raise RuntimeError(
+        "Could not reach requested "
+        "calendar month."
+    )
 
 
 async def get_available_days(page):
@@ -894,8 +956,8 @@ async def get_available_days(page):
             ).lower()
 
             if any(
-                x in classes
-                for x in [
+                word in classes
+                for word in [
                     "disabled",
                     "inactive",
                     "unavailable",
@@ -932,7 +994,7 @@ async def get_available_days(page):
     return sorted(set(days))
 
 
-async def click_day(
+async def click_calendar_day(
     page,
     day_number
 ):
@@ -952,12 +1014,11 @@ async def click_day(
             if not await cell.is_visible():
                 continue
 
-            if (
-                (
-                    await cell.inner_text()
-                ).strip()
-                != str(day_number)
-            ):
+            text = (
+                await cell.inner_text()
+            ).strip()
+
+            if text != str(day_number):
                 continue
 
             await cell.scroll_into_view_if_needed()
@@ -971,9 +1032,11 @@ async def click_day(
 
             except Exception:
 
-                await cell.locator(
+                child = cell.locator(
                     "a, button, [onclick]"
-                ).first.click(
+                ).first
+
+                await child.click(
                     force=True
                 )
 
@@ -989,7 +1052,7 @@ async def click_day(
     return False
 
 
-async def get_times(page):
+async def get_available_times(page):
 
     times = []
 
@@ -1051,14 +1114,14 @@ async def scan_calendar(page):
             f"{days}"
         )
 
-        for day in days:
+        for day_number in days:
 
             try:
 
                 appointment_date = date(
                     year,
                     month,
-                    day
+                    day_number
                 )
 
             except ValueError:
@@ -1067,16 +1130,20 @@ async def scan_calendar(page):
             if appointment_date < today:
                 continue
 
+            # We only want appointments BEFORE
+            # 02.12.2026.
             if appointment_date >= TARGET_DATE:
                 continue
 
-            if not await click_day(
+            clicked = await click_calendar_day(
                 page,
-                day
-            ):
+                day_number
+            )
+
+            if not clicked:
                 continue
 
-            times = await get_times(
+            times = await get_available_times(
                 page
             )
 
@@ -1104,6 +1171,10 @@ async def scan_calendar(page):
 
     return None
 
+
+# =========================================================
+# BROWSER
+# =========================================================
 
 async def run_checker():
 
@@ -1138,29 +1209,47 @@ async def run_checker():
 
         try:
 
-            await open_service(page)
+            await open_service(
+                page
+            )
 
-            # IMPORTANT NEW STEP:
-            # the service selection lands on
-            # dienstleistungsbeschreibung.php first.
-            await continue_from_description(page)
+            # IMPORTANT:
+            # The service-selection page opens
+            # dienstleistungsbeschreibung.php.
+            # The next button is:
+            # "weiter zur Terminvereinbarung"
+            await continue_from_description(
+                page
+            )
 
-            await accept_privacy(page)
+            await accept_privacy(
+                page
+            )
 
-            await fill_personal_data(page)
+            await fill_personal_data(
+                page
+            )
 
-            await select_location(page)
+            await select_location(
+                page
+            )
 
             log(
                 "Scanning appointment calendar..."
             )
 
-            return await scan_calendar(page)
+            return await scan_calendar(
+                page
+            )
 
         finally:
 
             await browser.close()
 
+
+# =========================================================
+# MAIN
+# =========================================================
 
 def main():
 
@@ -1207,7 +1296,8 @@ def main():
     if fingerprint == previous_state:
 
         log(
-            "Already notified."
+            "Already notified about "
+            "this exact availability."
         )
 
         return
@@ -1223,7 +1313,9 @@ def main():
         "It does NOT book the appointment."
     )
 
-    send_telegram(message)
+    send_telegram(
+        message
+    )
 
     write_state(
         fingerprint
