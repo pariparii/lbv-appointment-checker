@@ -45,7 +45,6 @@ def read_state():
         return STATE_FILE.read_text(
             encoding="utf-8"
         ).strip()
-
     return "NONE"
 
 
@@ -54,7 +53,6 @@ def write_state(value):
         parents=True,
         exist_ok=True
     )
-
     STATE_FILE.write_text(
         value,
         encoding="utf-8"
@@ -65,7 +63,10 @@ def send_telegram(message):
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
 
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    url = (
+        f"https://api.telegram.org/"
+        f"bot{token}/sendMessage"
+    )
 
     response = requests.post(
         url,
@@ -145,6 +146,7 @@ async def close_cookie_banner(page):
             element = locator.nth(i)
 
             try:
+
                 if not await element.is_visible():
                     continue
 
@@ -158,6 +160,86 @@ async def close_cookie_banner(page):
 
             except Exception:
                 pass
+
+
+async def accept_privacy(page):
+
+    log("Checking privacy page...")
+
+    body = ""
+
+    try:
+        body = await page.locator(
+            "body"
+        ).inner_text()
+    except Exception:
+        pass
+
+    if "Datenschutzerklärung" not in body:
+        return
+
+    log("Privacy page detected.")
+
+    checkboxes = page.locator(
+        'input[type="checkbox"]:visible'
+    )
+
+    for i in range(
+        await checkboxes.count()
+    ):
+
+        try:
+            checkbox = checkboxes.nth(i)
+
+            if not await checkbox.is_checked():
+                await checkbox.check(
+                    force=True
+                )
+
+        except Exception:
+            pass
+
+    for pattern in [
+        "weiter",
+        "bestätigen",
+        "zustimmen",
+        "akzeptieren",
+    ]:
+
+        try:
+
+            locator = page.get_by_text(
+                re.compile(
+                    pattern,
+                    re.IGNORECASE
+                )
+            )
+
+            for i in range(
+                await locator.count()
+            ):
+
+                element = locator.nth(i)
+
+                if await element.is_visible():
+
+                    try:
+                        await element.click(
+                            force=True
+                        )
+                    except Exception:
+                        await element.evaluate(
+                            "(el) => el.click()"
+                        )
+
+                    await page.wait_for_timeout(
+                        700
+                    )
+
+                    return
+
+        except Exception:
+            pass
 
 
 async def click_text(page, pattern):
@@ -176,7 +258,11 @@ async def click_text(page, pattern):
             f'Could not find "{pattern}"'
         )
 
-    for i in range(count - 1, -1, -1):
+    for i in range(
+        count - 1,
+        -1,
+        -1
+    ):
 
         element = locator.nth(i)
 
@@ -188,16 +274,20 @@ async def click_text(page, pattern):
             await element.scroll_into_view_if_needed()
 
             try:
+
                 await element.click(
                     timeout=3000
                 )
 
             except Exception:
+
                 await element.evaluate(
                     "(el) => el.click()"
                 )
 
-            await page.wait_for_timeout(600)
+            await page.wait_for_timeout(
+                700
+            )
 
             return
 
@@ -234,6 +324,7 @@ async def click_fuehrerschein(page):
             await element.scroll_into_view_if_needed()
 
             try:
+
                 await element.click(
                     timeout=3000
                 )
@@ -245,7 +336,11 @@ async def click_fuehrerschein(page):
                     (el) => {
                         let node = el;
 
-                        for (let i = 0; i < 8 && node; i++) {
+                        for (
+                            let i = 0;
+                            i < 8 && node;
+                            i++
+                        ) {
 
                             if (
                                 node.tagName === "BUTTON" ||
@@ -269,7 +364,9 @@ async def click_fuehrerschein(page):
                 if not clicked:
                     continue
 
-            await page.wait_for_timeout(800)
+            await page.wait_for_timeout(
+                800
+            )
 
             return
 
@@ -281,11 +378,16 @@ async def click_fuehrerschein(page):
     )
 
 
-async def click_eu_card_service(page):
+async def click_eu_service(page):
 
-    log("Selecting EU-Kartenführerschein...")
+    log(
+        "Selecting EU-Kartenführerschein..."
+    )
 
-    text = "Abholung bestellter EU-Kartenführerschein"
+    text = (
+        "Abholung bestellter "
+        "EU-Kartenführerschein"
+    )
 
     locator = page.get_by_text(
         text,
@@ -321,7 +423,8 @@ async def click_eu_card_service(page):
                 )
 
                 log(
-                    "EU-Kartenführerschein selected."
+                    "EU-Kartenführerschein "
+                    "selected."
                 )
 
                 return
@@ -377,7 +480,8 @@ async def click_eu_card_service(page):
                 )
 
                 log(
-                    "EU-Kartenführerschein selected."
+                    "EU-Kartenführerschein "
+                    "selected."
                 )
 
                 return
@@ -386,7 +490,7 @@ async def click_eu_card_service(page):
             continue
 
     raise RuntimeError(
-        "The EU-Kartenführerschein service was found "
+        "EU-Kartenführerschein was found "
         "but could not be clicked."
     )
 
@@ -397,13 +501,19 @@ async def select_service(page):
 
     await click_fuehrerschein(page)
 
-    await page.wait_for_timeout(1000)
+    await page.wait_for_timeout(
+        1000
+    )
 
     await close_modal(page)
 
-    await click_eu_card_service(page)
+    await click_eu_service(page)
 
-    await page.wait_for_timeout(1000)
+    await page.wait_for_timeout(
+        1000
+    )
+
+    await accept_privacy(page)
 
 
 async def fill_personal_data(page):
@@ -428,7 +538,8 @@ async def fill_personal_data(page):
 
         locator = page.get_by_text(
             re.compile(
-                "Der Termin ist für mich als Privatperson",
+                "Der Termin ist für mich als "
+                "Privatperson",
                 re.IGNORECASE
             )
         )
@@ -461,10 +572,11 @@ async def fill_personal_data(page):
         pass
 
     fields = page.locator(
-        "input[type='text'], input[type='email']"
+        "input[type='text'], "
+        "input[type='email']"
     )
 
-    visible_fields = []
+    visible = []
 
     for i in range(
         await fields.count()
@@ -475,26 +587,27 @@ async def fill_personal_data(page):
         try:
 
             if await field.is_visible():
-                visible_fields.append(field)
+                visible.append(field)
 
         except Exception:
             pass
 
-    if len(visible_fields) < 3:
+    if len(visible) < 3:
 
         raise RuntimeError(
-            "Could not find the three personal-data fields."
+            "Could not find the three "
+            "personal-data fields."
         )
 
-    await visible_fields[0].fill(
+    await visible[0].fill(
         first_name
     )
 
-    await visible_fields[1].fill(
+    await visible[1].fill(
         last_name
     )
 
-    await visible_fields[2].fill(
+    await visible[2].fill(
         email
     )
 
@@ -512,7 +625,9 @@ async def fill_personal_data(page):
 
 async def select_location(page):
 
-    log("Selecting LBV Mitte Führerschein...")
+    log(
+        "Selecting LBV Mitte Führerschein..."
+    )
 
     await close_modal(page)
 
@@ -556,7 +671,8 @@ async def get_calendar_month(page):
     if not match:
 
         raise RuntimeError(
-            "Could not determine calendar month."
+            "Could not determine "
+            "calendar month."
         )
 
     month_name = match.group(1)
@@ -687,7 +803,8 @@ async def click_month_arrow(
             pass
 
     raise RuntimeError(
-        f"Could not find calendar arrow {direction}"
+        f"Could not find calendar "
+        f"arrow {direction}"
     )
 
 
@@ -731,7 +848,8 @@ async def move_to_month(
             )
 
     raise RuntimeError(
-        "Could not reach requested calendar month."
+        "Could not reach requested "
+        "calendar month."
     )
 
 
@@ -783,14 +901,14 @@ async def get_available_days(page):
             ):
                 continue
 
-            aria_disabled = (
+            disabled = (
                 await cell.get_attribute(
                     "aria-disabled"
                 )
                 or ""
             ).lower()
 
-            if aria_disabled == "true":
+            if disabled == "true":
                 continue
 
             interactive = cell.locator(
@@ -832,12 +950,11 @@ async def click_day(
             if not await cell.is_visible():
                 continue
 
-            if (
-                (
-                    await cell.inner_text()
-                ).strip()
-                != str(day_number)
-            ):
+            text = (
+                await cell.inner_text()
+            ).strip()
+
+            if text != str(day_number):
                 continue
 
             await cell.click(
@@ -851,7 +968,7 @@ async def click_day(
             return True
 
         except Exception:
-            continue
+            pass
 
     return False
 
@@ -913,7 +1030,9 @@ async def scan_calendar(page):
         )
 
         log(
-            f"Checking {month:02d}/{year}: {days}"
+            f"Checking "
+            f"{month:02d}/{year}: "
+            f"{days}"
         )
 
         for day_number in days:
@@ -987,6 +1106,13 @@ async def run_checker():
         context = await browser.new_context(
             locale="de-DE",
             timezone_id="Europe/Berlin",
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; "
+                "Win64; x64) "
+                "AppleWebKit/537.36 "
+                "(KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
             viewport={
                 "width": 1440,
                 "height": 1000
@@ -999,14 +1125,20 @@ async def run_checker():
 
             log("Opening LBV...")
 
+            # IMPORTANT:
+            # Do not wait for the complete page load.
             await page.goto(
                 LBV_HOME,
-                wait_until="domcontentloaded",
-                timeout=60000
+                wait_until="commit",
+                timeout=30000
+            )
+
+            log(
+                f"LBV URL: {page.url}"
             )
 
             await page.wait_for_timeout(
-                1000
+                5000
             )
 
             await close_cookie_banner(
@@ -1056,7 +1188,8 @@ def main():
 
         log(
             f"ERROR: "
-            f"{type(error).__name__}: {error}"
+            f"{type(error).__name__}: "
+            f"{error}"
         )
 
         raise
@@ -1068,12 +1201,19 @@ def main():
             "02.12.2026."
         )
 
-        write_state("NONE")
+        write_state(
+            "NONE"
+        )
 
         return
 
-    appointment_date = result["date"]
-    times = result["times"]
+    appointment_date = result[
+        "date"
+    ]
+
+    times = result[
+        "times"
+    ]
 
     fingerprint = (
         appointment_date.isoformat()
@@ -1084,8 +1224,7 @@ def main():
     if fingerprint == previous_state:
 
         log(
-            "Already notified about "
-            "this availability."
+            "Already notified."
         )
 
         return
