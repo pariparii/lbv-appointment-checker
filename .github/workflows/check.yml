@@ -45,13 +45,21 @@ jobs:
         run: |
           python checker.py
 
+      - name: Upload LBV debug files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lbv-debug
+          path: debug/
+          if-no-files-found: warn
+          retention-days: 3
+
       - name: Save alert state
         if: always()
         run: |
           if git status --porcelain .state/last_alert.txt | grep -q .; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
             git add .state/last_alert.txt
             git commit -m "Update LBV alert state"
             git push
