@@ -8,8 +8,12 @@ from zoneinfo import ZoneInfo
 import requests
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
+
 BASE_URL = "https://lbv-termine.de/frontend/"
-FUEHRERSCHEIN_URL = BASE_URL + "dienstleistungsauswahl.php?kategorieid=1"
+FUEHRERSCHEIN_URL = (
+    BASE_URL + "dienstleistungsauswahl.php?kategorieid=1"
+)
+
 TARGET_DATE = date(2026, 12, 2)
 STATE_FILE = Path(".state/last_alert.txt")
 
@@ -29,68 +33,64 @@ MONTHS = {
 }
 
 
-def log(message):
+def log(message: str) -> None:
     print(f"[LBV] {message}", flush=True)
 
 
-def today_berlin():
+def today_berlin() -> date:
     return datetime.now(ZoneInfo("Europe/Berlin")).date()
 
 
-def read_state():
-    return STATE_FILE.read_text(encoding="utf-8").strip() if STATE_FILE.exists() else "NONE"
+def read_state() -> str:
+    if STATE_FILE.exists():
+        return STATE_FILE.read_text(encoding="utf-8").strip()
+    return "NONE"
 
 
-def write_state(value):
+def write_state(value: str) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(value, encoding="utf-8")
 
 
-def send_telegram(message):
+def send_telegram(message: str) -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
+
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     response = requests.post(
         url,
-        json={"chat_id": chat_id, "text": message, "disable_web_page_preview": True},
+        json={
+            "chat_id": chat_id,
+            "text": message,
+            "disable_web_page_preview": True,
+        },
         timeout=30,
     )
     response.raise_for_status()
 
 
-async def close_modal(page):
-    for pattern in [
+async def goto_lbv(page, url: str, wait_ms: int = 2500) -> None:
+    try:
+        await page.goto(url, wait_until="commit", timeout=30000)
+    except PlaywrightTimeoutError as exc:
+        # LBV may leave the connection open even after the page is usable.
+        log(f"Navigation timeout ignored: {exc}")
+
+    await page.wait_for_timeout(wait_ms)
+
+
+async def close_modal(page) -> None:
+    patterns = [
         r"Verstanden und schließen",
         r"Verstanden",
         r"Schließen",
-    ]:
+    ]
+
+    for pattern in patterns:
         locator = page.get_by_text(re.compile(pattern, re.IGNORECASE))
+
         for i in range(await locator.count()):
             element = locator.nth(i)
-            try:
-                if await element.is_visible():
-                    try:
-                        await element.click(force=True, timeout=2000)
-                    except Exception:
-                        await element.evaluate("(el) => el.click()")
-                    await page.wait_for_timeout(400)
-                    log("LBV information modal closed.")
-                    return True
-            except Exception:
-                pass
-    return False
 
-
-async def close_cookie_banner(page):
-    for pattern in [
-        r"Alle akzeptieren",
-        r"Akzeptieren",
-        r"Einverstanden",
-        r"Zustimmen",
-    ]:
-        locator = page.get_by_text(re.compile(pattern, re.IGNORECASE))
-        for i in range(await locator.count()):
-            element = locator.nth(i)
             try:
-                if await element.is_visible():
-                    try:
+                if not await element.is_visible():
